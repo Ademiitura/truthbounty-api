@@ -13,6 +13,7 @@ import {
 import { EventCheckpoint } from './entities/event-checkpoint.entity';
 import { RawLog } from './interfaces/canonical-event.interface';
 import { DataSource, Repository } from 'typeorm';
+import * as crypto from 'crypto';
 
 /**
  * Exercises CanonicalEventsService against a real (sqlite, in-memory)
@@ -62,10 +63,10 @@ describe('CanonicalEventsService (integration)', () => {
     moduleRef = await Test.createTestingModule({
       imports: [
         TypeOrmModule.forRoot({
-          type: 'sqlite',
+          type: 'better-sqlite3',
           database: ':memory:',
           // eslint-disable-next-line @typescript-eslint/no-require-imports
-          driver: require('sqlite3'),
+          driver: require('better-sqlite3'),
           entities: [
             CanonicalEvent,
             ContractArtifact,
@@ -98,6 +99,10 @@ describe('CanonicalEventsService (integration)', () => {
       chainId: 10,
       contractAddress,
       artifactVersion: 'v1',
+      abiChecksum: crypto
+        .createHash('sha256')
+        .update(JSON.stringify(abi))
+        .digest('hex'),
       abi,
       isApproved: true,
     });

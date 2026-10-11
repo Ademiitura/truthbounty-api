@@ -28,10 +28,10 @@ enum UserRole {
 model User {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now())
-  updatedAt DateTime @updated
+  updatedAt DateTime @updatedAt
 
   // Primary wallet address — canonical identifier for the user
-  walletAddress String @unique
+  walletAddress String? @unique
 
   reputation Int @default(0)
 
@@ -64,7 +64,7 @@ model Wallet {
 model SybilScore {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now())
-  updatedAt DateTime @updated
+  updatedAt DateTime @updatedAt
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -121,7 +121,7 @@ model Conversation {
   id        String   @id @default(uuid())
   title     String?
   createdAt  DateTime @default(now())
-  updatedAt DateTime @updated
+  updatedAt DateTime @updatedAt
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages  Message[]
@@ -195,7 +195,7 @@ model MetricAggregate {
   bucketStart DateTime
   filters    String @default("{}") // Canonical JSON string representing dimensions e.g. chain, role
   value       Float @default(0)
-  updatedAt  DateTime @updated
+  updatedAt  DateTime @updatedAt
 
   @@index([metricKey, period, bucketStart])
   @@unique([metricKey, period, bucketStart, filters])
@@ -230,4 +230,121 @@ model MonitoringMetric {
   recordedAt   DateTime @default(now())
 
   @@index([name, recordedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Transactional Outbox (V2-BE-048)
+// ---------------------------------------------------------------------------
+// OutboxEvent rows are written inside the same DB transaction as any
+// projection change. A background poller claims PENDING rows and relays
+// them to BullMQ, then marks them DISPATCHED.  The processor enforces
+// idempotency via a Redis SETNX guard keyed on idempotencyKey.
+//
+// Security: payload stores only non-sensitive routing metadata (aggregateId,
+// eventType, recipientIds). No private claim text, user PII, or settlement
+// data is persisted here.
+// ---------------------------------------------------------------------------
+model OutboxEvent {
+  id             String   @id @default(uuid())
+  // Domain event type, e.g. "notification.send", "webhook.deliver"
+  eventType      String
+  // Aggregate identifier for the triggering entity (e.g. notificationId)
+  aggregateId    String
+  // Routing metadata only — no private claim or settlement data
+  payload        String   // JSON-encoded OutboxEventPayload
+  // Stable key used by the processor for exactly-once delivery
+  idempotencyKey String   @unique
+  status         String   @default("PENDING") // PENDING | DISPATCHED | DEAD_LETTER
+  // BullMQ job id once dispatched (for observability)
+  jobId          String?
+  retryCount     Int      @default(0)
+  maxRetries     Int      @default(5)
+  lastError      String?
+  scheduledAt    DateTime @default(now())
+  processedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([status, scheduledAt])
+  @@index([aggregateId])
+  @@index([idempotencyKey])
+  @@index([eventType, status])
+}
+
+// ---------------------------------------------------------------------------
+// V2 indexer: block cursor + reorg ancestry
+// Supports src/v2/block-cursor (reorg detection by walking parentHash back to
+// a common ancestor). Heights are BigInt because some EVM chains exceed
+// Number.MAX_SAFE_INTEGER.
+// ---------------------------------------------------------------------------
+
+model BlockCursor {
+  id     String @id @default(uuid())
+  chainId Int
+  // Logical indexer stream, e.g. "canonical-events"
+  source String
+
+  processedHeight BigInt @default(0)
+  processedHash   String @default("")
+  safeHeight      BigInt @default(0)
+  safeHash        String @default("")
+  finalizedHeight BigInt @default(0)
+  finalizedHash   String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ancestors BlockCursorAncestor[]
+
+  @@unique([chainId, source])
+  @@index([chainId])
+}
+
+model BlockCursorAncestor {
+  id       String @id @default(uuid())
+  cursorId String
+  cursor   BlockCursor @relation(fields: [cursorId], references: [id], onDelete: Cascade)
+
+  height BigInt
+  hash   String
+  parentHash String
+  // observed | safe | finalized (matches ConfirmationLevel in block-cursor.types.ts)
+  confirmation String    @default("observed")
+  // False once this height is known to belong to an orphaned branch
+  isCanonical Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@unique([cursorId, height, hash])
+  @@index([cursorId, isCanonical])
+}
+
+// ---------------------------------------------------------------------------
+// V2 indexer: canonical-identity dedup for raw EVM logs.
+// A replay of the same (chainId, blockHash, txHash, logIndex) is rejected;
+// the same log position under a different block hash is retained so reorgs
+// stay diagnosable.
+// ---------------------------------------------------------------------------
+
+model ChainEvent {
+  id              String   @id @default(uuid())
+  chainId         Int
+  contractAddress String
+  eventName       String
+  // Decimal string, never a JS number/float.
+  blockNumber     String
+  blockHash       String
+  txHash          String
+  logIndex        Int
+  blockTimestamp  DateTime?
+  // JSON-encoded RawChainLog.payload
+  payload         String
+  // JSON-encoded RawChainLog.rawArgs
+  rawArgs         String
+
+ingestedAt DateTime @default(now())
+
+  @@unique([chainId, blockHash, txHash, logIndex])
+  @@index([chainId, txHash, logIndex])
+  @@index([eventName, blockNumber])
 }

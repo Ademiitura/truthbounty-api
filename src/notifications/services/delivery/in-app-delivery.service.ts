@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { BaseDeliveryService, DeliveryResult } from './base-delivery.service';
-import { DeliveryChannel, DeliveryStatus } from '../../enums/notification-type.enum';
+import { DeliveryChannel } from '../../enums/notification-type.enum';
 import { NotificationDelivery } from '../../entities/notification-delivery.entity';
 
 @Injectable()
@@ -10,7 +10,9 @@ export class InAppDeliveryService extends BaseDeliveryService {
 
   async deliver(delivery: NotificationDelivery): Promise<DeliveryResult> {
     try {
-      this.logger.debug(`In-app delivery for notification ${delivery.notificationId}`);
+      this.logger.debug(
+        `In-app delivery for notification ${delivery.notificationId}`,
+      );
       return {
         success: true,
         deliveredAt: new Date(),

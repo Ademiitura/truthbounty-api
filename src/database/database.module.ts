@@ -1,10 +1,18 @@
-import { Module, Global, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Module,
+  Global,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule, InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { DatabaseService } from './database.service';
 import { TransactionRunner } from './transaction.runner';
 import { TransactionHelper } from './transaction.helper';
+import { DatabaseReadinessService } from './database-readiness.service';
+import { MigrationValidatorService } from './migrations/migration-validator.service';
 
 /**
  * DatabaseModule — PostgreSQL infrastructure for TruthBounty V2.
@@ -45,6 +53,20 @@ import { TransactionHelper } from './transaction.helper';
  */
 @Global()
 @Module({
+  providers: [
+    DatabaseService,
+    DatabaseReadinessService,
+    MigrationValidatorService,
+    TransactionRunner,
+    TransactionHelper,
+  ],
+  exports: [
+    DatabaseService,
+    DatabaseReadinessService,
+    TransactionRunner,
+    TransactionHelper,
+    TypeOrmModule,
+  ],
   imports: [
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -66,13 +88,20 @@ import { TransactionHelper } from './transaction.helper';
               configService.get<string>('NODE_ENV') !== 'production' &&
               configService.get<string>('DATABASE_SYNCHRONIZE') === 'true',
             logging: configService.get<string>('DATABASE_LOGGING') === 'true',
-            ssl: configService.get<string>('DB_SSL') === 'true'
-              ? { rejectUnauthorized: false }
-              : false,
+            ssl:
+              configService.get<string>('DB_SSL') === 'true'
+                ? { rejectUnauthorized: false }
+                : false,
             extra: {
               max: configService.get<number>('DB_POOL_MAX', 20),
-              idleTimeoutMillis: configService.get<number>('DB_POOL_IDLE_TIMEOUT', 30000),
-              connectionTimeoutMillis: configService.get<number>('DB_POOL_ACQUIRE_TIMEOUT', 60000),
+              idleTimeoutMillis: configService.get<number>(
+                'DB_POOL_IDLE_TIMEOUT',
+                30000,
+              ),
+              connectionTimeoutMillis: configService.get<number>(
+                'DB_POOL_ACQUIRE_TIMEOUT',
+                60000,
+              ),
             },
           };
         }
@@ -82,7 +111,10 @@ import { TransactionHelper } from './transaction.helper';
         const port = configService.get<number>('DB_PORT', 5432);
         const username = configService.get<string>('DB_USERNAME', 'postgres');
         const password = configService.get<string>('DB_PASSWORD', '');
-        const database = configService.get<string>('DB_DATABASE', 'truthbounty');
+        const database = configService.get<string>(
+          'DB_DATABASE',
+          'truthbounty',
+        );
         const ssl = configService.get<string>('DB_SSL') === 'true';
 
         logger.log(`Connecting to PostgreSQL at ${host}:${port}/${database}`);
@@ -103,15 +135,19 @@ import { TransactionHelper } from './transaction.helper';
           ssl: ssl ? { rejectUnauthorized: false } : false,
           extra: {
             max: configService.get<number>('DB_POOL_MAX', 20),
-            idleTimeoutMillis: configService.get<number>('DB_POOL_IDLE_TIMEOUT', 30000),
-            connectionTimeoutMillis: configService.get<number>('DB_POOL_ACQUIRE_TIMEOUT', 60000),
+            idleTimeoutMillis: configService.get<number>(
+              'DB_POOL_IDLE_TIMEOUT',
+              30000,
+            ),
+            connectionTimeoutMillis: configService.get<number>(
+              'DB_POOL_ACQUIRE_TIMEOUT',
+              60000,
+            ),
           },
         };
       },
     }),
   ],
-  providers: [DatabaseService, TransactionRunner, TransactionHelper],
-  exports: [DatabaseService, TransactionRunner, TransactionHelper, TypeOrmModule],
 })
 export class DatabaseModule implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DatabaseModule.name);

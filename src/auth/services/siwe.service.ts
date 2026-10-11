@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { verifyMessage } from 'ethers';
 import {
-  SiweMessage,
+  constantTimeAddressEqual,
+  timingSafeEqualUtf8,
+} from '../../common/utils/timing-safe.util';
+import {
   ParsedSiweMessage,
   SiweVerifyParams,
   SiweVerifyResult,
@@ -34,11 +37,10 @@ export class SiweService {
   private readonly expectedStatement?: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.NONCE_TTL_MS =
-      parseInt(
-        configService.get<string>('AUTH_NONCE_TTL_MS', String(5 * 60 * 1000)),
-        10,
-      );
+    this.NONCE_TTL_MS = parseInt(
+      configService.get<string>('AUTH_NONCE_TTL_MS', String(5 * 60 * 1000)),
+      10,
+    );
 
     this.allowedOrigins = this.parseList(
       configService.get<string>('SIWE_ALLOWED_ORIGINS'),
@@ -116,7 +118,9 @@ export class SiweService {
       const lines = rawMessage.split('\n');
 
       // Check if this is a SIWE-formatted message
-      if (rawMessage.includes('wants you to sign in with your Ethereum account')) {
+      if (
+        rawMessage.includes('wants you to sign in with your Ethereum account')
+      ) {
         return this.parseSiweFormat(lines, rawMessage);
       }
 
@@ -171,14 +175,16 @@ export class SiweService {
       supportedChainIds,
     } = params;
 
-    // 1. Recover address from signature
+    // 1. Recover address from signature — constant-shape failure.
     let recoveredAddress: string;
     try {
       recoveredAddress = verifyMessage(message, signature);
     } catch {
+      this.logger.warn('SIWE verification failed [signature]');
+      timingSafeEqualUtf8(message, message);
       return {
         success: false,
-        error: 'INVALID_SIGNATURE',
+        error: 'AUTH_FAILED',
         address: undefined,
       };
     }
@@ -186,9 +192,11 @@ export class SiweService {
     // 2. Parse the message
     const parsed = this.parseMessage(message);
     if (!parsed) {
+      this.logger.warn('SIWE verification failed [malformed]');
+      timingSafeEqualUtf8(message, message);
       return {
         success: false,
-        error: 'MALFORMED_MESSAGE',
+        error: 'AUTH_FAILED',
         address: recoveredAddress,
       };
     }
@@ -210,7 +218,7 @@ export class SiweService {
         data: parsed,
       };
     }
-    if (parsed.nonce.length < NONCE_MIN_LENGTH) {
+    if (!parsed.nonce || parsed.nonce.length < NONCE_MIN_LENGTH) {
       return {
         success: false,
         error: 'INVALID_NONCE',
@@ -227,14 +235,16 @@ export class SiweService {
       };
     }
 
-    // 3. Validate address matches (case-insensitive)
+    // 3. Validate address matches (timing-safe, case-insensitive)
     if (
       parsed.address &&
-      parsed.address.toLowerCase() !== recoveredAddress.toLowerCase()
+      !constantTimeAddressEqual(parsed.address, recoveredAddress)
     ) {
+      this.logger.warn('SIWE verification failed [address]');
+      timingSafeEqualUtf8(message, message);
       return {
         success: false,
-        error: 'ADDRESS_MISMATCH',
+        error: 'AUTH_FAILED',
         address: recoveredAddress,
       };
     }
@@ -244,7 +254,7 @@ export class SiweService {
       ? allowedDomains
       : this.allowedDomains;
     if (expectedDomain) {
-      if (!this.domainsEqual(parsed.domain, expectedDomain)) {
+      if (!timingSafeEqualUtf8(parsed.domain, expectedDomain)) {
         return {
           success: false,
           error: 'DOMAIN_MISMATCH',
@@ -338,6 +348,7 @@ export class SiweService {
     if (parsed.expirationTime) {
       const expirationMs = new Date(parsed.expirationTime).getTime();
       if (Number.isNaN(expirationMs) || Date.now() > expirationMs) {
+        this.logger.warn('SIWE verification failed [expired]');
         return {
           success: false,
           error: 'MESSAGE_EXPIRED',
@@ -350,6 +361,7 @@ export class SiweService {
     if (parsed.notBefore) {
       const notBeforeMs = new Date(parsed.notBefore).getTime();
       if (Number.isNaN(notBeforeMs) || Date.now() < notBeforeMs) {
+        this.logger.warn('SIWE verification failed [not-yet-valid]');
         return {
           success: false,
           error: 'MESSAGE_NOT_YET_VALID',
@@ -370,6 +382,7 @@ export class SiweService {
       };
     }
     if (Date.now() - issuedAtMs > this.NONCE_TTL_MS) {
+      this.logger.warn('SIWE verification failed [stale]');
       return {
         success: false,
         error: 'MESSAGE_STALE',
@@ -378,6 +391,7 @@ export class SiweService {
       };
     }
     if (issuedAtMs > Date.now() + 60_000) {
+      this.logger.warn('SIWE verification failed [future]');
       return {
         success: false,
         error: 'MESSAGE_FROM_FUTURE',
@@ -425,7 +439,10 @@ export class SiweService {
 
   // ── Private helpers ──────────────────────────────────────────────────────
 
-  private parseSiweFormat(lines: string[], rawMessage: string): ParsedSiweMessage | null {
+  private parseSiweFormat(
+    lines: string[],
+    rawMessage: string,
+  ): ParsedSiweMessage | null {
     const result: Partial<ParsedSiweMessage> = {
       version: '1',
       chainId: 1,
@@ -512,8 +529,15 @@ export class SiweService {
       result.statement = statementLines.join('\n');
     }
 
-    // Ensure required fields exist
-    if (!result.domain || !result.uri || !result.nonce || !result.issuedAt) {
+    // Ensure required fields exist; both an EIP-4361 address and a URI are
+    // mandatory so a truncated message cannot satisfy strict verification.
+    if (
+      !result.domain ||
+      !result.address ||
+      !result.uri ||
+      !result.nonce ||
+      !result.issuedAt
+    ) {
       return null;
     }
 

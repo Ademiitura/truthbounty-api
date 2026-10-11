@@ -20,12 +20,17 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ci-api-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
+  security-events: write
 
 jobs:
   build-and-test:
-    name: Build, Lint, and Test
+    name: Build, TypeCheck, Lint, and Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -82,29 +87,69 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Dependency audit
-        continue-on-error: false
-        run: npm audit --audit-level=high
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Installed from the lockfile so the audit is evaluated against the exact
+      # tree that ships, and so this job installs deterministically like the rest.
+      - name: Install dependencies
+        run: npm ci
+
+      # Canonical dependency scanner. `pipefail` keeps npm's non-zero exit on a
+      # high-or-critical finding, so this step still fails the workflow. The
+      # report is written to a file and uploaded below as retained evidence.
+      - name: Dependency audit (npm audit)
+        run: |
+          set -o pipefail
+          npm audit --audit-level=high 2>&1 | tee npm-audit-report.txt
+
+      # `if: always()` only ensures the evidence is retained when the audit step
+      # fails; it does not suppress the failure. See docs/DEPENDENCY_SECURITY.md.
+      - name: Publish dependency audit evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-audit-report
+          path: npm-audit-report.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Generate SBOM and run dependency audit
+        run: npm run security:dependencies
+
+      - name: Upload dependency SBOM
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-sbom-${{ github.sha }}
+          path: artifacts/dependency-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Secret scanning (TruffleHog)
-        uses: trufflesecurity/trufflehog@a5f3de55cc2065ae4dde8fee24076f137fd62fcf # v3.97.8
+        uses: trufflesecurity/trufflehog@4dd8831c5f12599465d4d45c3c447b4018a34c85 # v3.97.9
         with:
           path: ./
           base: ${{ github.event.repository.default_branch }}
           head: HEAD
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@d8073367669608af8fbcc5f63dd0a0d52bb90cff # v4
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
-          languages: javascript, typescript
+          languages: javascript-typescript
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@d8073367669608af8fbcc5f63dd0a0d52bb90cff # v4
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: "/language:javascript-typescript"
 
   container-scan:
     name: Container Vulnerability Scan
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -124,13 +169,13 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
 
-  sensitive-changes-check:
+  sensitive-changes-protection:
     name: Sensitive Changes Protection
-    runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
       pull-requests: read
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -146,6 +191,8 @@ jobs:
             sensitive:
               - 'src/auth/**'
               - 'src/indexer/**'
+              - 'src/migrations/**'
+              - 'src/prisma/**'
               - 'src/database/**'
               - 'src/v2/**'
               - 'prisma/**'
@@ -179,17 +226,25 @@ jobs:
       - build-and-test
       - security-scans
       - container-scan
-      - sensitive-changes-check
+      - sensitive-changes-protection
     if: always()
     steps:
-      - name: Fail closing on any required gate failure
+      - name: Fail closed on any required gate failure
         uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9
         with:
           script: |
             const gates = ${{ toJSON(needs) }};
-            const failed = Object.values(gates).filter((g) => g.result === 'failure');
-            if (failed.length > 0) {
+            const failures = Object.entries(gates)
+              .filter(([name, g]) => {
+                if (g.result === 'success') return false;
+                // `sensitive-changes-protection` is a PR-only job and is
+                // deliberately skipped on pushes to main.
+                if (name === 'sensitive-changes-protection' && g.result === 'skipped') return false;
+                return true;
+              })
+              .map(([name, g]) => `${name}:${g.result}`);
+            if (failures.length > 0) {
               throw new Error(
-                `Required gates failed: ${failed.map((g) => `${g.result}:${g.outcome}`).join(', ')}`
+                `Required gates failed: ${failures.join(', ')}`
               );
             }

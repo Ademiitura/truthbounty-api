@@ -1,4 +1,7 @@
-import { UnauthorizedException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
+import {
+  UnauthorizedException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 
 jest.mock('ethers', () => ({
@@ -25,7 +28,9 @@ describe('AuthService', () => {
   beforeEach(() => {
     jwtService = {
       sign: jest.fn().mockReturnValue('signed-token'),
-      decode: jest.fn().mockReturnValue({ address: '0xabcd', userId: 'user-123' }),
+      decode: jest
+        .fn()
+        .mockReturnValue({ address: '0xabcd', userId: 'user-123' }),
     };
 
     prisma = {
@@ -42,11 +47,16 @@ describe('AuthService', () => {
 
     siweService = {
       buildSiweMessage: jest.fn().mockReturnValue('SIWE message mock'),
-      buildLegacyMessage: jest.fn().mockImplementation(
-        (nonce: string, app?: string) => `Sign in to ${app || 'TruthBounty'}: ${nonce}`,
-      ),
+      buildLegacyMessage: jest
+        .fn()
+        .mockImplementation(
+          (nonce: string, app?: string) =>
+            `Sign in to ${app || 'TruthBounty'}: ${nonce}`,
+        ),
       parseMessage: jest.fn().mockReturnValue(null),
-      verifySiwe: jest.fn().mockResolvedValue({ success: false, error: 'NOT_SIWE' }),
+      verifySiwe: jest
+        .fn()
+        .mockResolvedValue({ success: false, error: 'NOT_SIWE' }),
       validateProviderSignature: jest.fn().mockReturnValue(true),
     };
 
@@ -91,12 +101,16 @@ describe('AuthService', () => {
       const address = '0xAbCd';
       const result = await authService.generateChallenge(address);
 
-      expect(result.message).toMatch(/^Sign in to TruthBounty: [A-Za-z0-9]{32}$/);
+      expect(result.message).toMatch(
+        /^Sign in to TruthBounty: [A-Za-z0-9]{32}$/,
+      );
       expect(result.format).toBe('legacy');
 
       expect(redisService.set).toHaveBeenCalledWith(
         'auth:nonce:0xabcd',
-        expect.stringMatching(/^\{.*"nonce":"[A-Za-z0-9]{32}".*"issuedAt":\d+.*\}$/s),
+        expect.stringMatching(
+          /^\{.*"nonce":"[A-Za-z0-9]{32}".*"issuedAt":\d+.*\}$/s,
+        ),
         NONCE_TTL_SECONDS,
       );
     });
@@ -183,7 +197,9 @@ describe('AuthService', () => {
       const address = '0xDeAdBeEf';
       const nonce = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456';
 
-      redisService.get.mockResolvedValueOnce(makeRecord(nonce, NONCE_TTL_SECONDS));
+      redisService.get.mockResolvedValueOnce(
+        makeRecord(nonce, NONCE_TTL_SECONDS),
+      );
       (verifyMessage as jest.Mock).mockReturnValue(address);
 
       await expect(
@@ -192,14 +208,16 @@ describe('AuthService', () => {
           signature: '0xsig',
           message: `Sign in to TruthBounty: ${nonce}`,
         } as any),
-      ).rejects.toThrow('Challenge expired');
+      ).rejects.toThrow('Invalid credentials');
     });
 
     it('rejects stale challenge (Redis TTL desync)', async () => {
       const address = '0xDeAdBeEf';
       const nonce = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456';
 
-      redisService.get.mockResolvedValueOnce(makeRecord(nonce, NONCE_TTL_SECONDS + 30));
+      redisService.get.mockResolvedValueOnce(
+        makeRecord(nonce, NONCE_TTL_SECONDS + 30),
+      );
       (verifyMessage as jest.Mock).mockReturnValue(address);
 
       await expect(
@@ -208,7 +226,7 @@ describe('AuthService', () => {
           signature: '0xsig',
           message: `Sign in to TruthBounty: ${nonce}`,
         } as any),
-      ).rejects.toThrow('Challenge expired');
+      ).rejects.toThrow('Invalid credentials');
     });
 
     it('accepts login just inside TTL window', async () => {
@@ -216,7 +234,9 @@ describe('AuthService', () => {
       const lower = address.toLowerCase();
       const nonce = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456';
 
-      redisService.get.mockResolvedValueOnce(makeRecord(nonce, NONCE_TTL_SECONDS - 1));
+      redisService.get.mockResolvedValueOnce(
+        makeRecord(nonce, NONCE_TTL_SECONDS - 1),
+      );
       prisma.wallet.findFirst.mockResolvedValueOnce({
         address: lower,
         user: { id: 'uid-1' },
@@ -247,7 +267,9 @@ describe('AuthService', () => {
         } as any),
       ).rejects.toBeInstanceOf(UnauthorizedException);
 
-      expect(redisService.del).toHaveBeenCalledWith(`auth:nonce:${address.toLowerCase()}`);
+      expect(redisService.del).toHaveBeenCalledWith(
+        `auth:nonce:${address.toLowerCase()}`,
+      );
     });
 
     it('rejects login when address mismatches recovered address', async () => {
@@ -271,13 +293,80 @@ describe('AuthService', () => {
         throw new Error('invalid signature');
       });
 
+      // issue-416: constant-shape — parse failures collapse to generic 401.
       await expect(
         authService.login({
           address: '0xAbCd',
           signature: 'badsig',
           message: 'some message',
         } as any),
-      ).rejects.toThrow('Invalid signature format');
+      ).rejects.toThrow('Invalid credentials');
+    });
+
+    it('returns constant-shape 401 for all login failure modes (no enumeration)', async () => {
+      // address mismatch
+      (verifyMessage as jest.Mock).mockReturnValueOnce('0xDifferentAddress');
+      await expect(
+        authService.login({
+          address: '0xAaBbCc',
+          signature: '0xsig',
+          message: 'Sign in to TruthBounty: NONCE',
+        } as any),
+      ).rejects.toThrow('Invalid credentials');
+
+      // missing challenge
+      (verifyMessage as jest.Mock).mockReturnValueOnce('0xAaBbCc');
+      redisService.get.mockResolvedValueOnce(null);
+      await expect(
+        authService.login({
+          address: '0xAaBbCc',
+          signature: '0xsig',
+          message: 'Sign in to TruthBounty: NONCE',
+        } as any),
+      ).rejects.toThrow('Invalid credentials');
+
+      // invalid nonce
+      (verifyMessage as jest.Mock).mockReturnValueOnce('0xAaBbCc');
+      redisService.get.mockResolvedValueOnce(
+        makeRecord('REALNONCE12345678901234567890', 0),
+      );
+      await expect(
+        authService.login({
+          address: '0xAaBbCc',
+          signature: '0xsig',
+          message: 'Sign in to TruthBounty: WRONGNONCE',
+        } as any),
+      ).rejects.toThrow('Invalid credentials');
+    });
+
+    it('prevents replay: concurrent reuse of the same nonce fails closed', async () => {
+      const address = '0xAaBbCc';
+      const nonce = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456';
+      (verifyMessage as jest.Mock).mockReturnValue(address);
+      // First use succeeds then nonce deleted; second GET misses.
+      redisService.get
+        .mockResolvedValueOnce(makeRecord(nonce, 0))
+        .mockResolvedValueOnce(null);
+      prisma.wallet.findFirst.mockResolvedValueOnce({
+        address,
+        user: { id: 'u1' },
+      } as any);
+
+      await expect(
+        authService.login({
+          address,
+          signature: '0xsig',
+          message: `Sign in to TruthBounty: ${nonce}`,
+        } as any),
+      ).resolves.toBeDefined();
+      await expect(
+        authService.login({
+          address,
+          signature: '0xsig',
+          message: `Sign in to TruthBounty: ${nonce}`,
+        } as any),
+      ).rejects.toThrow('Invalid credentials');
+      expect(redisService.del).toHaveBeenCalled();
     });
 
     it('returns token pair when user has no wallet yet (anonymous auth)', async () => {
@@ -313,7 +402,9 @@ describe('AuthService', () => {
       expect(result.accessToken).toBe('new-access-token');
       expect(result.refreshToken).toBe('new-jti.new-refresh-value');
       expect(result.user).toEqual({ id: 'user-123', address: '0xabcd' });
-      expect(tokenService.refreshAccessToken).toHaveBeenCalledWith('valid-refresh-token');
+      expect(tokenService.refreshAccessToken).toHaveBeenCalledWith(
+        'valid-refresh-token',
+      );
     });
 
     it('should propagate token service errors', async () => {
@@ -321,9 +412,9 @@ describe('AuthService', () => {
         new UnauthorizedException('Refresh token not found or expired'),
       );
 
-      await expect(
-        authService.refresh('bad-token'),
-      ).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(authService.refresh('bad-token')).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
     });
   });
 
@@ -345,8 +436,13 @@ describe('AuthService', () => {
     });
 
     it('should reject logout with empty payload', async () => {
-      await expect(authService.logout(null)).rejects.toBeInstanceOf(BadRequestException);
-      await expect(authService.logout({})).rejects.toBeInstanceOf(BadRequestException);
+      // issue-416: constant-shape auth failure (was BadRequest, now generic 401).
+      await expect(authService.logout(null)).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      await expect(authService.logout({})).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
     });
   });
 
