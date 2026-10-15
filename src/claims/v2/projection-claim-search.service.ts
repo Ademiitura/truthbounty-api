@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, In, Like, ILike } from 'typeorm';
-import { ClaimRecord } from '../../entities/claim-record.entity';
+import { Claim as ClaimRecord } from '../entities/claim.entity';
 import { ClaimState } from '../../domain/claim/claimState';
 import { CacheKeyRegistryService } from '../../cache/cache-key-registry.service';
 
