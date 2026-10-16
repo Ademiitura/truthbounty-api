@@ -312,6 +312,9 @@ export class CacheKeyRegistryService implements OnModuleInit {
     if (!def.scopes || def.scopes.length === 0) {
       throw new Error('At least one scope must be specified');
     }
+    if (!def.invalidationTriggers || def.invalidationTriggers.length === 0) {
+      throw new Error('At least one invalidation trigger must be specified');
+    }
   }
 
   /**
@@ -444,6 +447,9 @@ export class CacheKeyRegistryService implements OnModuleInit {
         ttlSeconds: 3600,
         scopes: ['chain'],
         tags: ['blockchain', 'block'],
+        invalidationTriggers: [
+          { event: 'blockchain.reorg', pattern: 'blockchain:block:*' },
+        ],
       },
       {
         key: 'blockchain:events:{chainId}:{contractAddress}:{fromBlock}:{toBlock}',
