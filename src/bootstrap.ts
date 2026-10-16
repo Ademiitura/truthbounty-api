@@ -64,6 +64,7 @@ export function configureApp(app: INestApplication) {
       'audit',
       'Audit logging, search, compliance reporting, and retention management',
     )
+    .addTag('support', 'Privacy-safe support intake and retention controls')
     .addTag('health', 'Health check endpoints')
     .addTag(
       'ai-assistant',

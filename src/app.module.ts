@@ -29,6 +29,7 @@ import { ClaimsModule } from './claims/claims.module';
 import { ClaimFeedModule } from './claims/v2/claim-feed.module';
 import { AuditModule } from './audit/audit.module';
 import { ThemeModule } from './theme.module';
+import { SupportModule } from './support/support.module';
 import { AuditLoggingInterceptor } from './audit/interceptors/audit-logging.interceptor';
 import { LoggerModule } from './logger/logger.module';
 import { LoggingInterceptor } from './logger/logging.interceptor';
@@ -338,6 +339,7 @@ async function createThrottlerStorage(
     ClaimFeedModule,
     AuditModule,
     ThemeModule,
+    SupportModule,
     MetricsModule,
     NotificationsModule,
     ReputationModule,
