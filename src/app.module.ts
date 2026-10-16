@@ -30,6 +30,7 @@ import { ClaimFeedModule } from './claims/v2/claim-feed.module';
 import { ClaimReadModelsModule } from './claims/v2/read-models/claim-read-models.module';
 import { AuditModule } from './audit/audit.module';
 import { ThemeModule } from './theme.module';
+import { SupportModule } from './support/support.module';
 import { AuditLoggingInterceptor } from './audit/interceptors/audit-logging.interceptor';
 import { LoggerModule } from './logger/logger.module';
 import { LoggingInterceptor } from './logger/logging.interceptor';
@@ -61,6 +62,7 @@ import { IdempotencyGuard } from './common/idempotency/idempotency.guard';
 import { IndexerModule } from './indexer/indexer.module';
 import { V2OutboxModule } from './v2/outbox/v2-outbox.module';
 import { CredentialRotationModule } from './security/credential-rotation.module';
+import { OperationsModule } from './operations/operations.module';
 
 // In-memory storage for development (no Redis needed)
 class ThrottlerMemoryStorage {
@@ -341,6 +343,7 @@ async function createThrottlerStorage(
     ClaimReadModelsModule,
     AuditModule,
     ThemeModule,
+    SupportModule,
     MetricsModule,
     NotificationsModule,
     ReputationModule,
@@ -365,6 +368,8 @@ async function createThrottlerStorage(
     // V2-BE-113: TypeORM-side Transactional Outbox
     V2OutboxModule,
     CredentialRotationModule,
+    // UX-BE-004 (#595): protected operations, safe-retry and audit interfaces
+    OperationsModule,
   ],
   controllers: [AppController],
   providers: [
