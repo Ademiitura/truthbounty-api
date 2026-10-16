@@ -59,6 +59,7 @@ import { IdempotencyModule } from './common/idempotency/idempotency.module';
 import { IdempotencyGuard } from './common/idempotency/idempotency.guard';
 import { IndexerModule } from './indexer/indexer.module';
 import { V2OutboxModule } from './v2/outbox/v2-outbox.module';
+import { CredentialRotationModule } from './security/credential-rotation.module';
 
 // In-memory storage for development (no Redis needed)
 class ThrottlerMemoryStorage {
@@ -363,6 +364,7 @@ async function createThrottlerStorage(
     IndexerModule,
     // V2-BE-113: TypeORM-side Transactional Outbox
     V2OutboxModule,
+    CredentialRotationModule,
   ],
   controllers: [AppController],
   providers: [
