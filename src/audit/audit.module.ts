@@ -1,3 +1,5 @@
+import { AdminAuditLog } from './entities/admin-audit-log.entity';
+import { AdminAuditHead } from './entities/admin-audit-head.entity';
 import { Module, Global } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -22,7 +24,12 @@ import { AuditLogProcessor } from './processors/audit-log.processor';
 @Global()
 @Module({
   imports: [
-    TypeOrmModule.forFeature([AuditLog, AuditChainState]),
+    TypeOrmModule.forFeature([
+      AuditLog,
+      AuditChainState,
+      AdminAuditLog,
+      AdminAuditHead,
+    ]),
     TypeOrmModule.forFeature([AuditLog, Admin]),
     ScheduleModule,
     BullModule.registerQueue({
