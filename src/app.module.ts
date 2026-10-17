@@ -62,6 +62,8 @@ import { IndexerModule } from './indexer/indexer.module';
 import { V2OutboxModule } from './v2/outbox/v2-outbox.module';
 import { CredentialRotationModule } from './security/credential-rotation.module';
 import { OperationsModule } from './operations/operations.module';
+import { AbuseSignalsModule } from './abuse-signals/abuse-signals.module';
+import { AbuseSignalInterceptor } from './abuse-signals/abuse-signal.interceptor';
 
 // In-memory storage for development (no Redis needed)
 class ThrottlerMemoryStorage {
@@ -367,6 +369,9 @@ async function createThrottlerStorage(
     CredentialRotationModule,
     // UX-BE-004 (#595): protected operations, safe-retry and audit interfaces
     OperationsModule,
+    // PREWAVE-BE-086 (#681): abuse signals. Observe-only until a maintainer
+    // sets ABUSE_SIGNALS_ENFORCEMENT_ENABLED; never protocol authority.
+    AbuseSignalsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -391,6 +396,13 @@ async function createThrottlerStorage(
     {
       provide: APP_INTERCEPTOR,
       useClass: ProfilerInterceptor,
+    },
+    {
+      // PREWAVE-BE-086 (#681): records abuse observations on scored routes and
+      // enforces a bounded action only once enforcement has been activated. A
+      // passthrough while ABUSE_SIGNALS_ENFORCEMENT_ENABLED is false.
+      provide: APP_INTERCEPTOR,
+      useClass: AbuseSignalInterceptor,
     },
   ],
 })
