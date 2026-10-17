@@ -4,4 +4,4 @@ export * from './dispute.fixture';
 export * from './blockchain.fixture';
 export * from './api-frontend-contract.fixtures';
 export * from './openapi-breaking-change.fixtures';
-export * from './claim-read-model.fixtures';
+export * from './optimism-sepolia-decoder.fixtures';
