@@ -29,6 +29,7 @@
     "db:restore:test": "ts-node src/scripts/backup-restore-drill.ts",
     "seed": "ts-node src/scripts/seed.ts",
     "seed:ai": "ts-node src/scripts/seed-ai-knowledge-base.ts",
+    "smoke:staging": "ts-node src/scripts/staging-smoke.ts",
     "benchmark:indexes": "ts-node scripts/benchmark-indexes.ts",
     "benchmark:compare": "ts-node scripts/compare-benchmarks.ts",
     "security:dependencies": "node scripts/dependency-audit.mjs",
